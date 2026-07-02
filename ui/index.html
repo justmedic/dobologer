@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>dobologer</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2f3f;
+      --text: #e4e6ed;
+      --muted: #8b90a0;
+      --accent: #5b8def;
+      --accent-hover: #7aa3f5;
+      --success: #4ade80;
+      --error: #f87171;
+      --mono: "SF Mono", "Cascadia Code", "Fira Code", Menlo, monospace;
+      --radius: 8px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    header p {
+      margin: 0.25rem 0 0;
+      color: var(--muted);
+      font-size: 0.875rem;
+    }
+
+    main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+    }
+
+    section h2 {
+      margin: 0 0 1rem;
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    label {
+      display: block;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 0.35rem;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    textarea {
+      width: 100%;
+      padding: 0.55rem 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 0.9rem;
+      font-family: inherit;
+      transition: border-color 0.15s;
+    }
+
+    input:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    textarea {
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      resize: vertical;
+      min-height: 120px;
+    }
+
+    .row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .field { flex: 1; min-width: 160px; }
+    .field-narrow { flex: 0 0 100px; }
+
+    button {
+      padding: 0.55rem 1.1rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 0.875rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+
+    button:hover { background: var(--accent-hover); }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .hint {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.5rem;
+    }
+
+    .status {
+      margin-top: 0.75rem;
+      font-size: 0.85rem;
+      min-height: 1.25rem;
+    }
+
+    .status.error { color: var(--error); }
+    .status.success { color: var(--success); }
+    .status.info { color: var(--muted); }
+
+    .stats {
+      display: flex;
+      gap: 1.5rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 0.75rem;
+    }
+
+    .stats strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    #results {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      max-height: 480px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+    }
+
+    #results li {
+      padding: 0.5rem 0.75rem;
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      border-bottom: 1px solid var(--border);
+      word-break: break-all;
+    }
+
+    #results li:last-child { border-bottom: none; }
+
+    #results:empty::after {
+      content: "Нет результатов";
+      display: block;
+      padding: 1.5rem;
+      text-align: center;
+      color: var(--muted);
+      font-family: inherit;
+      font-size: 0.85rem;
+    }
+
+    .empty-state {
+      padding: 1.5rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>dobologer</h1>
+    <p>Поиск и загрузка логов</p>
+  </header>
+
+  <main>
+    <section id="search-panel">
+      <h2>Поиск</h2>
+      <div class="row">
+        <div class="field">
+          <label for="query">Запрос</label>
+          <input type="text" id="query" placeholder="error AND NOT timeout" autocomplete="off">
+        </div>
+        <div class="field-narrow">
+          <label for="limit">Limit</label>
+          <input type="number" id="limit" value="100" min="0" step="1">
+        </div>
+        <button type="button" id="search-btn">Искать</button>
+      </div>
+      <p class="hint">AND / OR / NOT, скобки. Пробел между термами = AND. limit=0 — без ограничения.</p>
+      <div id="search-status" class="status"></div>
+      <div id="search-stats" class="stats" hidden>
+        <span>Показано: <strong id="stat-count">0</strong></span>
+        <span>Всего: <strong id="stat-total">0</strong></span>
+      </div>
+      <ul id="results"></ul>
+    </section>
+
+    <section id="ingest-panel">
+      <h2>Ingest</h2>
+      <label for="ingest-lines">Строки логов (одна строка = одна запись)</label>
+      <textarea id="ingest-lines" placeholder="GET /api/users 200&#10;POST /api/login 401 auth_error"></textarea>
+      <div class="row" style="margin-top: 0.75rem;">
+        <button type="button" id="ingest-btn">Отправить</button>
+      </div>
+      <div id="ingest-status" class="status"></div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (sel) => document.querySelector(sel);
+
+  async function api(path, opts = {}) {
+    const res = await fetch(path, opts);
+    if (!res.ok) {
+      const err = new Error(`HTTP ${res.status}`);
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  }
+
+  function setStatus(el, msg, type = "info") {
+    el.textContent = msg;
+    el.className = `status ${type}`;
+  }
+
+  function renderResults(results) {
+    const list = $("#results");
+    list.innerHTML = "";
+    if (!results || results.length === 0) return;
+    const frag = document.createDocumentFragment();
+    for (const line of results) {
+      const li = document.createElement("li");
+      li.textContent = line;
+      frag.appendChild(li);
+    }
+    list.appendChild(frag);
+  }
+
+  async function runSearch() {
+    const query = $("#query").value.trim();
+    const limitVal = $("#limit").value;
+    const statusEl = $("#search-status");
+    const statsEl = $("#search-stats");
+    const btn = $("#search-btn");
+
+    if (!query) {
+      setStatus(statusEl, "Введите поисковый запрос", "error");
+      return;
+    }
+
+    btn.disabled = true;
+    setStatus(statusEl, "Поиск…", "info");
+    statsEl.hidden = true;
+
+    try {
+      const params = new URLSearchParams({ query });
+      if (limitVal !== "") params.set("limit", limitVal);
+
+      const data = await api(`/search?${params}`);
+
+      $("#stat-count").textContent = data.count;
+      $("#stat-total").textContent = data.total;
+      statsEl.hidden = false;
+      renderResults(data.results);
+
+      if (data.total === 0) {
+        setStatus(statusEl, "Совпадений не найдено", "info");
+      } else {
+        setStatus(statusEl, `Запрос: ${data.query}`, "success");
+      }
+    } catch (err) {
+      renderResults([]);
+      statsEl.hidden = true;
+      if (err.status === 400) {
+        setStatus(statusEl, "Ошибка синтаксиса запроса", "error");
+      } else {
+        setStatus(statusEl, `Ошибка: ${err.message}`, "error");
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  async function runIngest() {
+    const raw = $("#ingest-lines").value;
+    const statusEl = $("#ingest-status");
+    const btn = $("#ingest-btn");
+
+    const lines = raw.split("\n").map((s) => s.trim()).filter(Boolean);
+    if (lines.length === 0) {
+      setStatus(statusEl, "Введите хотя бы одну строку", "error");
+      return;
+    }
+
+    btn.disabled = true;
+    setStatus(statusEl, "Отправка…", "info");
+
+    try {
+      const data = await api("/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(lines),
+      });
+      setStatus(statusEl, `Загружено строк: ${data.ingested}`, "success");
+    } catch (err) {
+      if (err.status === 400) {
+        setStatus(statusEl, "Некорректный JSON или формат данных", "error");
+      } else {
+        setStatus(statusEl, `Ошибка: ${err.message}`, "error");
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  $("#search-btn").addEventListener("click", runSearch);
+  $("#ingest-btn").addEventListener("click", runIngest);
+  $("#query").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") runSearch();
+  });
+  </script>
+</body>
+</html>

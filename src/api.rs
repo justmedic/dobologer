@@ -3,6 +3,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Query as AxumQuery, State},
     http::StatusCode,
+    response::Html,
     routing::{get, post},
     Json, Router,
 };
@@ -45,9 +46,14 @@ pub struct SearchResponse {
 
 pub fn router(engine: SharedEngine, flushes: Arc<FlushCoordinator>) -> Router {
     Router::new()
+        .route("/", get(root_handler))
         .route("/ingest", post(ingest_handler))
         .route("/search", get(search_handler).post(search_post_handler))
         .with_state(Arc::new(AppState { engine, flushes }))
+}
+
+async fn root_handler() -> Html<&'static str> {
+    Html(include_str!("../ui/index.html"))
 }
 
 async fn ingest_handler(
