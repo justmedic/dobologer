@@ -10,7 +10,7 @@ use crate::block::format::{
     DictEntry,
 };
 use crate::config::{pack_rows, ZSTD_LEVEL};
-use crate::index::pack_postings;
+use crate::index::{pack_postings, PostingChunk};
 
 pub fn flush_block(data_dir: &Path, block: &ActiveBlock) -> Result<()> {
     fs::create_dir_all(data_dir).context("create data directory")?;
@@ -118,10 +118,21 @@ fn write_idx_file(path: &Path, inverted: &std::collections::HashMap<String, Vec<
         let num_chunks = chunks.len() as u32;
 
         for chunk in &chunks {
-            writer.write_all(&[chunk.num_bits])?;
-            file_offset += 1;
-            writer.write_all(&chunk.data)?;
-            file_offset += chunk.data.len() as u64;
+            match chunk {
+                PostingChunk::BitPacked { num_bits, data } => {
+                    writer.write_all(&[*num_bits])?;
+                    file_offset += 1;
+                    writer.write_all(data)?;
+                    file_offset += data.len() as u64;
+                }
+                PostingChunk::VarInt { count, data } => {
+                    writer.write_all(&[0])?;
+                    write_u32(&mut writer, *count)?;
+                    file_offset += 5;
+                    writer.write_all(data)?;
+                    file_offset += data.len() as u64;
+                }
+            }
         }
 
         dict_entries.push(DictEntry {

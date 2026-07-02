@@ -3,13 +3,13 @@ use std::fs::File;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use bitpacking::{BitPacker, BitPacker4x};
 use memmap2::Mmap;
 
 use crate::block::format::{
     block_paths, load_dictionary, parse_data_header, parse_idx_footer, DataHeader, DictEntry,
 };
-use crate::index::unpack_postings;
+use crate::index::{parse_posting_chunk, unpack_posting_chunks};
+use crate::query::{BlockIndex, PostingSet};
 
 pub struct BlockReader {
     pub block_id: u64,
@@ -54,21 +54,16 @@ impl BlockReader {
             if offset >= self.idx_mmap.len() {
                 break;
             }
-            let num_bits = self.idx_mmap[offset];
-            offset += 1;
-            let chunk_size = BitPacker4x::compressed_block_size(num_bits);
-            let end = offset + chunk_size;
-            if end > self.idx_mmap.len() {
-                break;
-            }
-            let data = &self.idx_mmap[offset..end];
-            let owned = data.to_vec();
-            chunks.push((num_bits, owned));
-            offset = end;
+            let (chunk, consumed) = parse_posting_chunk(&self.idx_mmap[offset..])?;
+            chunks.push(chunk);
+            offset += consumed;
         }
 
-        let chunk_refs: Vec<(u8, &[u8])> = chunks.iter().map(|(nb, data)| (*nb, data.as_slice())).collect();
-        unpack_postings(&chunk_refs, entry.num_ids)
+        unpack_posting_chunks(&chunks, entry.num_ids)
+    }
+
+    pub fn num_lines(&self) -> usize {
+        self.data_header.num_lines as usize
     }
 
     pub fn fetch_lines(&self, ids: &[u32]) -> Result<Vec<String>> {
@@ -118,6 +113,16 @@ impl BlockReader {
         let end = self.data_header.pack_offsets[pack_idx + 1] as usize;
         let compressed = &self.data_mmap[start..end];
         zstd::decode_all(compressed).context("zstd decompress data pack")
+    }
+}
+
+impl BlockIndex for BlockReader {
+    fn term_ids(&self, token: &str) -> Result<PostingSet> {
+        self.search_token(token)
+    }
+
+    fn num_lines(&self) -> usize {
+        self.data_header.num_lines as usize
     }
 }
 

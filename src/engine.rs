@@ -3,13 +3,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::Result;
+use rayon::prelude::*;
 use tokio::sync::RwLock;
 
 use crate::block::active::ActiveBlock;
 use crate::block::reader::{list_block_ids, BlockReader};
 use crate::block::writer::flush_block;
 use crate::config::block_rows;
-use crate::tokenizer::first_token;
+use crate::query::{eval, parse_query, Query};
 
 pub struct Engine {
     pub data_dir: PathBuf,
@@ -35,35 +36,49 @@ struct SearchSnapshot {
     active: Arc<ActiveBlock>,
     flushing: Vec<Arc<ActiveBlock>>,
     sealed: Vec<Arc<BlockReader>>,
-    token: String,
+    query: Query,
     limit: Option<usize>,
 }
 
 impl SearchSnapshot {
     fn execute(self) -> Result<SearchResult> {
-        let token = self.token.as_str();
         let max = self.limit.unwrap_or(usize::MAX);
 
         let mut total = 0usize;
-        total += self.active.count_for_token(token);
-        for block in &self.flushing {
-            total += block.count_for_token(token);
-        }
 
-        let mut sealed_jobs = Vec::with_capacity(self.sealed.len());
-        for reader in &self.sealed {
-            let ids = reader.search_token(token)?;
+        let active_ids = eval(&self.query, self.active.as_ref())?;
+        total += active_ids.len();
+
+        let mut flushing_jobs: Vec<(Arc<ActiveBlock>, Vec<u32>)> = Vec::new();
+        for block in &self.flushing {
+            let ids = eval(&self.query, block.as_ref())?;
             total += ids.len();
             if !ids.is_empty() {
-                sealed_jobs.push((Arc::clone(reader), ids));
+                flushing_jobs.push((Arc::clone(block), ids));
             }
         }
 
-        let mut results = self.active.lines_for_token(token, max);
+        let sealed_jobs: Vec<(Arc<BlockReader>, Vec<u32>)> = self
+            .sealed
+            .par_iter()
+            .map(|reader| {
+                let ids = eval(&self.query, reader.as_ref())?;
+                Ok((Arc::clone(reader), ids))
+            })
+            .collect::<Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|(_, ids)| !ids.is_empty())
+            .collect();
+
+        for (_, ids) in &sealed_jobs {
+            total += ids.len();
+        }
+
+        let mut results = self.active.lines_for_ids(&active_ids, max);
         if results.len() < max {
-            for block in &self.flushing {
+            for (block, ids) in &flushing_jobs {
                 let remaining = max - results.len();
-                results.extend(block.lines_for_token(token, remaining));
+                results.extend(block.lines_for_ids(ids, remaining));
                 if results.len() >= max {
                     break;
                 }
@@ -155,14 +170,24 @@ impl Engine {
     }
 
     pub fn search_with_limit(&self, query: &str, limit: Option<usize>) -> Result<SearchResult> {
-        let mut scratch = String::new();
-        let token = first_token(query, &mut scratch).to_string();
+        let parsed = parse_query(query)?;
 
         SearchSnapshot {
             active: Arc::clone(&self.active),
             flushing: self.flushing.clone(),
             sealed: self.sealed.clone(),
-            token,
+            query: parsed,
+            limit,
+        }
+        .execute()
+    }
+
+    pub fn search_query(&self, query: &Query, limit: Option<usize>) -> Result<SearchResult> {
+        SearchSnapshot {
+            active: Arc::clone(&self.active),
+            flushing: self.flushing.clone(),
+            sealed: self.sealed.clone(),
+            query: query.clone(),
             limit,
         }
         .execute()
@@ -173,19 +198,16 @@ pub type SharedEngine = Arc<RwLock<Engine>>;
 
 pub async fn search_async(
     engine: &SharedEngine,
-    query: &str,
+    query: Query,
     limit: Option<usize>,
 ) -> Result<SearchResult> {
-    let mut scratch = String::new();
-    let token = first_token(query, &mut scratch).to_string();
-
     let snapshot = {
         let guard = engine.read().await;
         SearchSnapshot {
             active: Arc::clone(&guard.active),
             flushing: guard.flushing.clone(),
             sealed: guard.sealed.clone(),
-            token,
+            query,
             limit,
         }
     };

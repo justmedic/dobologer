@@ -3,4 +3,7 @@ pub mod block;
 pub mod config;
 pub mod engine;
 pub mod index;
+pub mod ingest;
+pub mod net;
+pub mod query;
 pub mod tokenizer;

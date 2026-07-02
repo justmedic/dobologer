@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 
+use anyhow::Result;
+
+use crate::query::{BlockIndex, PostingSet};
 use crate::tokenizer::{normalize_token, tokenize};
 
 #[derive(Debug, Clone)]
@@ -66,8 +69,25 @@ impl ActiveBlock {
             .collect()
     }
 
+    pub fn lines_for_ids(&self, ids: &[u32], limit: usize) -> Vec<String> {
+        ids.iter()
+            .take(limit)
+            .filter_map(|&id| self.lines.get(id as usize).cloned())
+            .collect()
+    }
+
     pub fn search_token(&self, token: &str) -> Vec<String> {
         self.lines_for_token(token, usize::MAX)
+    }
+}
+
+impl BlockIndex for ActiveBlock {
+    fn term_ids(&self, token: &str) -> Result<PostingSet> {
+        Ok(self.ids_for_token(token).to_vec())
+    }
+
+    fn num_lines(&self) -> usize {
+        self.lines.len()
     }
 }
 
