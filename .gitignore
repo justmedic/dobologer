@@ -2,3 +2,4 @@
 /.venv
 *.py
 *.pyc
+/data

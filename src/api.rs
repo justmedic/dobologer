@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -6,11 +8,17 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::engine::{flush_block_async, SharedEngine};
+use crate::engine::{search_async, spawn_detached_flushes, FlushCoordinator, SharedEngine};
+
+pub struct AppState {
+    pub engine: SharedEngine,
+    pub flushes: Arc<FlushCoordinator>,
+}
 
 #[derive(Deserialize)]
 pub struct SearchQuery {
     pub query: String,
+    pub limit: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -22,49 +30,44 @@ pub struct IngestResponse {
 pub struct SearchResponse {
     pub query: String,
     pub count: usize,
+    pub total: usize,
     pub results: Vec<String>,
 }
 
-pub fn router(engine: SharedEngine) -> Router {
+pub fn router(engine: SharedEngine, flushes: Arc<FlushCoordinator>) -> Router {
     Router::new()
         .route("/ingest", post(ingest_handler))
         .route("/search", get(search_handler))
-        .with_state(engine)
+        .with_state(Arc::new(AppState { engine, flushes }))
 }
 
 async fn ingest_handler(
-    State(engine): State<SharedEngine>,
+    State(state): State<Arc<AppState>>,
     Json(lines): Json<Vec<String>>,
 ) -> Result<Json<IngestResponse>, StatusCode> {
     let (ingested, flushed_blocks) = {
-        let mut guard = engine.write().await;
+        let mut guard = state.engine.write().await;
         let result = guard.ingest(lines);
         (result.ingested, result.flushed_blocks)
     };
 
-    for block in flushed_blocks {
-        flush_block_async(engine.clone(), block)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    }
+    spawn_detached_flushes(&state.flushes, state.engine.clone(), flushed_blocks);
 
     Ok(Json(IngestResponse { ingested }))
 }
 
 async fn search_handler(
-    State(engine): State<SharedEngine>,
+    State(state): State<Arc<AppState>>,
     Query(params): Query<SearchQuery>,
 ) -> Result<Json<SearchResponse>, StatusCode> {
-    let results = {
-        let guard = engine.read().await;
-        guard
-            .search(&params.query)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    };
+    let search = search_async(&state.engine, &params.query, params.limit)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok(Json(SearchResponse {
         query: params.query,
-        count: results.len(),
-        results,
+        count: search.results.len(),
+        total: search.total,
+        results: search.results,
     }))
 }

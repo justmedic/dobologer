@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::tokenizer::{normalize_token, tokenize};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ActiveBlock {
     pub id: u64,
     pub lines: Vec<String>,
@@ -45,17 +45,29 @@ impl ActiveBlock {
         self.lines.len()
     }
 
-    pub fn search_token(&self, token: &str) -> Vec<String> {
+    pub fn ids_for_token(&self, token: &str) -> &[u32] {
         let mut scratch = String::new();
         let normalized = normalize_token(token, &mut scratch);
         self.inverted
             .get(normalized)
-            .map(|ids| {
-                ids.iter()
-                    .map(|&id| self.lines[id as usize].clone())
-                    .collect()
-            })
-            .unwrap_or_default()
+            .map(|ids| ids.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn count_for_token(&self, token: &str) -> usize {
+        self.ids_for_token(token).len()
+    }
+
+    pub fn lines_for_token(&self, token: &str, limit: usize) -> Vec<String> {
+        self.ids_for_token(token)
+            .iter()
+            .take(limit)
+            .map(|&id| self.lines[id as usize].clone())
+            .collect()
+    }
+
+    pub fn search_token(&self, token: &str) -> Vec<String> {
+        self.lines_for_token(token, usize::MAX)
     }
 }
 

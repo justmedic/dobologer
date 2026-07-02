@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::Context;
 use dobologer::api::router;
 use dobologer::config::{data_dir, DEFAULT_BIND_ADDR};
-use dobologer::engine::{flush_active_on_shutdown, Engine};
+use dobologer::engine::{flush_active_on_shutdown, FlushCoordinator, Engine};
 use tokio::sync::RwLock;
 
 #[tokio::main]
@@ -15,7 +15,8 @@ async fn main() -> anyhow::Result<()> {
         .context("invalid DOBOLOGER_BIND_ADDR")?;
 
     let engine = Arc::new(RwLock::new(Engine::open(data_dir())?));
-    let app = router(engine.clone());
+    let flushes = Arc::new(FlushCoordinator::new());
+    let app = router(engine.clone(), flushes.clone());
 
     let listener = tokio::net::TcpListener::bind(bind_addr)
         .await
@@ -27,7 +28,10 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("serve")?;
 
-    println!("shutdown signal received, flushing active block...");
+    println!("shutdown signal received, waiting for background flushes...");
+    flushes.wait_all().await;
+
+    println!("flushing active block...");
     match flush_active_on_shutdown(&engine).await {
         Ok(()) => println!("active block flushed, exiting cleanly"),
         Err(err) => eprintln!("failed to flush active block on shutdown: {err:#}"),
